@@ -12,7 +12,7 @@ namespace FakeRank;
 
 public static class EventHandlers
 {
-    private static readonly Dictionary<string, string> FakeRanks = new();
+    private static readonly Dictionary<string, (string, string)> FakeRanks = new();
     private static CoroutineHandle _coroutine;
 
     public static void RegisterEvents()
@@ -34,17 +34,19 @@ public static class EventHandlers
     {
         while (true)
         {
-            foreach (KeyValuePair<string, string> rank in FakeRanks)
+            foreach (KeyValuePair<string, (string, string)> rank in FakeRanks)
                 if (Player.TryGet(rank.Key, out Player player))
                 {
                     if (string.IsNullOrEmpty(player.GroupName))
                     {
-                        player.GroupName = rank.Value + " (Stammspieler)";
+                        player.GroupName = rank.Value.Item1 + " (Stammspieler)";
+                        player.GroupColor = rank.Value.Item2;
                     }
                     else
                     {
                         if (player.GroupName.Contains("(")) continue;
-                        player.GroupName = rank.Value + " (" + player.GroupName + ")";
+                        player.GroupName = rank.Value.Item1 + " (" + player.GroupName + ")";
+                        player.GroupColor = rank.Value.Item2;
                     }
                 }
 
@@ -74,24 +76,37 @@ public static class EventHandlers
                 new AuthenticationHeaderValue("Bearer", config.BackendAPIToken);
 
             HttpResponseMessage response = await client.GetAsync(endpoint);
-            string fakeRank = string.Empty;
 
             if (response.IsSuccessStatusCode)
             {
-                fakeRank = await response.Content.ReadAsStringAsync();
+                string responseContent = await response.Content.ReadAsStringAsync();
                 Logger.Debug($"Successfully fetched FakeRank for User ID: {userId}");
+
+                // Parse the tuple response (fakerank,fakerank_color)
+                string[] parts = responseContent.Split(',');
+                if (parts.Length == 2)
+                {
+                    string fakeRankName = parts[0].Trim();
+                    string fakeRankColor = parts[1].Trim();
+                    FakeRanks[userId] = (fakeRankName, fakeRankColor);
+                }
+                else
+                {
+                    Logger.Debug(
+                        $"Invalid response format for User ID: {userId}. Expected tuple, got: {responseContent}");
+                    FakeRanks[userId] = (string.Empty, string.Empty);
+                }
             }
             else
             {
                 Logger.Debug($"Failed to fetch FakeRank for User ID: {userId}. Status: {response.StatusCode}");
+                FakeRanks[userId] = (string.Empty, string.Empty);
             }
-
-            FakeRanks[userId] = fakeRank;
         }
         catch (Exception ex)
         {
             Logger.Debug($"Exception while fetching FakeRank for User ID {userId}: {ex}");
-            FakeRanks[userId] = string.Empty;
+            FakeRanks[userId] = (string.Empty, string.Empty);
         }
     }
 }

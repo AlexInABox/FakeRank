@@ -23,22 +23,26 @@ export async function onRequestGet(request: Request, env: Env, ctx: ExecutionCon
 			return new Response('User ID is required', { status: 400 });
 		}
 
-		// Query the playerdata table for the user's fakerank
-		const stmt = env.DB.prepare('SELECT fakerank FROM playerdata WHERE id = ?');
+		// Query the playerdata table for the user's fakerank and fakerank_color
+		const stmt = env.DB.prepare('SELECT fakerank, fakerank_color FROM playerdata WHERE id = ?');
 		const result = await stmt.bind(userId).first();
 
 		if (!result) {
 			return new Response('Player data not found', { status: 404 });
 		}
 
-		// Extract fakerank from the result
+		// Extract fakerank and fakerank_color from the result
 		const fakerank = result.fakerank;
+		const fakerankColor = result.fakerank_color;
 
 		if (fakerank === null || fakerank === undefined || fakerank === '') {
 			return new Response('Fakerank not found', { status: 404 });
 		}
 
-		return new Response(String(fakerank), {
+		// Return both fakerank and fakerank_color as a tuple (comma-separated)
+		const response = `${fakerank},${fakerankColor}`;
+
+		return new Response(response, {
 			status: 200,
 			headers: {
 				'Content-Type': 'text/plain',
