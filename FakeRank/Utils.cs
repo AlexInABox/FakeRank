@@ -1,4 +1,3 @@
-using UnityEngine;
 using UserSettings.ServerSpecific;
 
 namespace FakeRank;
@@ -9,16 +8,14 @@ public static class Utils
     ///     Registers the SSSS for the plugin based on values in the config and translation files, by combining the existing
     ///     settings with the new ones.
     /// </summary>
-    public static void RegisterKeybinds()
+    public static void RegisterSSS()
     {
         ServerSpecificSettingBase[] extra =
         [
-            new SSGroupHeader(Plugin.Instance.Translation.FakeRankGroupHeader),
-            new SSKeybindSetting(
-                Plugin.Instance.Config!.KeybindId,
-                Plugin.Instance.Translation.KeybindSettingLabel,
-                KeyCode.None, true, false,
-                Plugin.Instance.Translation.KeybindSettingHintDescription)
+            new SSGroupHeader(Plugin.Instance.Translation.GroupHeader),
+            new SSButton(Plugin.Instance.Config!.RefreshButtonId, "Meinen FakeRank aktualisieren:",
+                Plugin.Instance.Translation.RefreshButtonLabel,
+                null, Plugin.Instance.Translation.RefreshButtonHint)
         ];
 
         ServerSpecificSettingBase[] existing = ServerSpecificSettingsSync.DefinedSettings ?? [];

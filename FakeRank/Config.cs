@@ -9,5 +9,8 @@ public class Config
     public string BackendAPIToken { get; set; } = "your_api_token_here";
 
     [Description("The ID of the keybind setting. This should be unique for each plugin.")]
-    public int KeybindId { get; set; } = 300;
+    public int RefreshButtonId { get; set; } = 600;
+
+    [Description("The ID of the keybind setting. This should be unique for each plugin.")]
+    public int AdminRefreshButtonId { get; set; } = 601;
 }

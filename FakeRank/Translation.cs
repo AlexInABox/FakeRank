@@ -4,13 +4,13 @@ namespace FakeRank;
 
 public class Translation
 {
-    [Description("The label for the keybind setting")]
-    public string KeybindSettingLabel { get; set; } = "FakeRank";
+    public string RefreshButtonLabel { get; set; } = "FakeRank aktualisieren...";
+    public string AdminRefreshButtonLabel { get; set; } = "Für alle Spieler aktualisieren...";
 
     [Description("The hint description for the keybind setting")]
-    public string KeybindSettingHintDescription { get; set; } =
-        "Press this key to FakeRank!!";
+    public string RefreshButtonHint { get; set; } =
+        "Aktualisiert deinen FakeRank nachdem du ihn auf der Website geändert hast.";
 
-    [Description("Header text for the spray settings group")]
-    public string FakeRankGroupHeader { get; set; } = "FakeRank Plugin Settings";
+    [Description("Header text for the fakerank settings group")]
+    public string GroupHeader { get; set; } = "FakeRank";
 }

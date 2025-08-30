@@ -4,9 +4,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using LabApi.Events.Arguments.PlayerEvents;
 using LabApi.Events.Handlers;
-using LabApi.Features.Console;
 using LabApi.Features.Wrappers;
 using MEC;
+using UserSettings.ServerSpecific;
 
 namespace FakeRank;
 
@@ -15,8 +15,17 @@ public static class EventHandlers
     private static readonly Dictionary<string, (string, string)> FakeRanks = new();
     private static CoroutineHandle _coroutine;
 
+    private static readonly Dictionary<string, (DateTime LastFetch, (string Name, string Color) Rank)> FakeRankCache =
+        new();
+
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(10);
+
     public static void RegisterEvents()
     {
+        Utils.RegisterSSS();
+
+        ServerSpecificSettingsSync.ServerOnSettingValueReceived += OnSSSReceived;
+
         // Feel free to add more event registrations here
         PlayerEvents.Joined += OnJoined;
 
@@ -24,8 +33,18 @@ public static class EventHandlers
         _coroutine = Timing.RunCoroutine(FakeRankLoop());
     }
 
+    private static void OnSSSReceived(ReferenceHub hub, ServerSpecificSettingBase ev)
+    {
+        if (!Player.TryGet(hub.networkIdentity, out Player player))
+            return;
+
+        if (ev is SSButton button && button.SettingId == Plugin.Instance.Config!.RefreshButtonId)
+            GetFakeRankFromBackend(player.UserId);
+    }
+
     public static void UnregisterEvents()
     {
+        ServerSpecificSettingsSync.ServerOnSettingValueReceived -= OnSSSReceived;
         PlayerEvents.Joined -= OnJoined;
         Timing.KillCoroutines(_coroutine);
     }
@@ -35,20 +54,57 @@ public static class EventHandlers
         while (true)
         {
             foreach (KeyValuePair<string, (string, string)> rank in FakeRanks)
-                if (Player.TryGet(rank.Key, out Player player))
+            {
+                if (!Player.TryGet(rank.Key, out Player player))
+                    continue;
+
+                string fakeRank = rank.Value.Item1;
+                string fakeColor = rank.Value.Item2;
+
+                // Case 1: Player has no rank (null or empty)
+                if (string.IsNullOrEmpty(player.GroupName))
                 {
-                    if (string.IsNullOrEmpty(player.GroupName))
+                    if (!string.IsNullOrEmpty(fakeRank))
                     {
-                        player.GroupName = rank.Value.Item1 + " (Stammspieler)";
-                        player.GroupColor = rank.Value.Item2;
+                        player.GroupName = fakeRank + " (Stammspieler)";
+                        player.GroupColor = fakeColor;
+                    }
+
+                    continue;
+                }
+
+                // Case 2: Already in format "FakeRank (Original)"
+                if (player.GroupName.Contains("("))
+                {
+                    string currentFake = player.GroupName.Split('(')[0].Trim();
+                    string originalRank = player.GroupName.Split('(')[1].Split(')')[0].Trim();
+
+                    if (currentFake == fakeRank && player.GroupColor == fakeColor)
+                        continue; // already correct
+
+                    if (!string.IsNullOrEmpty(fakeRank))
+                    {
+                        // Replace old fake with new fake or update color
+                        player.GroupName = fakeRank + " (" + originalRank + ")";
+                        player.GroupColor = fakeColor;
                     }
                     else
                     {
-                        if (player.GroupName.Contains("(")) continue;
-                        player.GroupName = rank.Value.Item1 + " (" + player.GroupName + ")";
-                        player.GroupColor = rank.Value.Item2;
+                        // Remove fake, restore original
+                        player.GroupName = originalRank;
+                        player.GroupColor = "default";
                     }
+
+                    continue;
                 }
+
+                // Case 3: Has a rank but no parentheses -> add fake rank
+                if (!string.IsNullOrEmpty(fakeRank))
+                {
+                    player.GroupName = fakeRank + " (" + player.GroupName + ")";
+                    player.GroupColor = fakeColor;
+                }
+            }
 
             yield return Timing.WaitForSeconds(1);
         }
@@ -64,49 +120,36 @@ public static class EventHandlers
 
     private static async void GetFakeRankFromBackend(string userId)
     {
+        if (FakeRankCache.TryGetValue(userId, out (DateTime LastFetch, (string Name, string Color) Rank) cache) &&
+            DateTime.UtcNow - cache.LastFetch < CacheDuration)
+        {
+            FakeRanks[userId] = cache.Rank;
+            return;
+        }
+
+        (string Name, string Color) rank = (string.Empty, string.Empty);
+
         try
         {
-            Config config = Plugin.Instance.Config!;
-            string endpoint = $"{config.BackendURL}/fakerank?userid={Uri.EscapeDataString(userId)}";
-
-            Logger.Debug($"Fetching FakeRank from endpoint: {endpoint}");
-
+            Config cfg = Plugin.Instance.Config!;
             using HttpClient client = new();
             client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", config.BackendAPIToken);
+                new AuthenticationHeaderValue("Bearer", cfg.BackendAPIToken);
 
-            HttpResponseMessage response = await client.GetAsync(endpoint);
-
-            if (response.IsSuccessStatusCode)
+            HttpResponseMessage res =
+                await client.GetAsync($"{cfg.BackendURL}/fakerank?userid={Uri.EscapeDataString(userId)}");
+            if (res.IsSuccessStatusCode)
             {
-                string responseContent = await response.Content.ReadAsStringAsync();
-                Logger.Debug($"Successfully fetched FakeRank for User ID: {userId}");
-
-                // Parse the tuple response (fakerank,fakerank_color)
-                string[] parts = responseContent.Split(',');
+                string[] parts = (await res.Content.ReadAsStringAsync()).Split(',');
                 if (parts.Length == 2)
-                {
-                    string fakeRankName = parts[0].Trim();
-                    string fakeRankColor = parts[1].Trim();
-                    FakeRanks[userId] = (fakeRankName, fakeRankColor);
-                }
-                else
-                {
-                    Logger.Debug(
-                        $"Invalid response format for User ID: {userId}. Expected tuple, got: {responseContent}");
-                    FakeRanks[userId] = (string.Empty, string.Empty);
-                }
-            }
-            else
-            {
-                Logger.Debug($"Failed to fetch FakeRank for User ID: {userId}. Status: {response.StatusCode}");
-                FakeRanks[userId] = (string.Empty, string.Empty);
+                    rank = (parts[0].Trim(), parts[1].Trim());
             }
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.Debug($"Exception while fetching FakeRank for User ID {userId}: {ex}");
-            FakeRanks[userId] = (string.Empty, string.Empty);
         }
+
+        FakeRanks[userId] = rank;
+        FakeRankCache[userId] = (DateTime.UtcNow, rank);
     }
 }
