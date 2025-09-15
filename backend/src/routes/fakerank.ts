@@ -23,27 +23,33 @@ export async function onRequestGet(request: Request, env: Env, ctx: ExecutionCon
 			return new Response('User ID is required', { status: 400 });
 		}
 
-		// Query the playerdata table for the user's fakerank, fakerank_color, and fakerank_until
-		const stmt = env.DB.prepare('SELECT fakerank, fakerank_color, fakerank_until FROM playerdata WHERE id = ?');
+		// Query the playerdata table for the user's fakerank, fakerank_color, fakerank_until, and fakerankoverride_until
+		const stmt = env.DB.prepare('SELECT fakerank, fakerank_color, fakerank_until, fakerankoverride_until FROM playerdata WHERE id = ?');
 		const result = await stmt.bind(userId).first();
 
 		if (!result) {
 			return new Response('Player data not found', { status: 404 });
 		}
 
-		// Extract fakerank, fakerank_color, and fakerank_until from the result
+		// Extract fakerank, fakerank_color, fakerank_until, and fakerankoverride_until from the result
 		const fakerank = result.fakerank;
 		const fakerankColor = result.fakerank_color;
 		const fakerankUntil = result.fakerank_until;
+		const fakerankOverrideUntil = result.fakerankoverride_until;
 
 		// Check if fakerank exists
 		if (fakerank === null || fakerank === undefined || fakerank === '') {
 			return new Response('Fakerank not found', { status: 404 });
 		}
 
-		// Check if fakerank is still valid (timestamp must be in the future)
+		// Check if fakerank is still valid
 		const currentTimestamp = Math.floor(Date.now() / 1000); // Current Unix timestamp
-		if (typeof fakerankUntil !== 'number' || fakerankUntil <= currentTimestamp) {
+
+		// Check if override is active (takes precedence)
+		const hasOverride = typeof fakerankOverrideUntil === 'number' && fakerankOverrideUntil > currentTimestamp;
+
+		// If no override, check regular fakerank_until timestamp
+		if (!hasOverride && (typeof fakerankUntil !== 'number' || fakerankUntil <= currentTimestamp)) {
 			return new Response('Fakerank expired', { status: 403 });
 		}
 
