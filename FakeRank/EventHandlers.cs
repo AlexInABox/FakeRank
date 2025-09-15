@@ -6,47 +6,33 @@ using LabApi.Events.Arguments.PlayerEvents;
 using LabApi.Events.Handlers;
 using LabApi.Features.Wrappers;
 using MEC;
-using UserSettings.ServerSpecific;
 
 namespace FakeRank;
 
 public static class EventHandlers
 {
     private static readonly Dictionary<string, (string, string)> FakeRanks = new();
-    private static CoroutineHandle _coroutine;
-
-    private static readonly Dictionary<string, (DateTime LastFetch, (string Name, string Color) Rank)> FakeRankCache =
-        new();
-
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(10);
+    private static CoroutineHandle _coroutineFakeRankLoop;
+    private static CoroutineHandle _coroutineFetchLoop;
 
     public static void RegisterEvents()
     {
-        Utils.RegisterSSS();
+        //Apply fakerank every ten seconds
+        _coroutineFakeRankLoop = Timing.RunCoroutine(FakeRankLoop());
 
-        ServerSpecificSettingsSync.ServerOnSettingValueReceived += OnSSSReceived;
+        //Refetch from backend every ten seconds
+        _coroutineFetchLoop = Timing.RunCoroutine(FetchLoop());
 
-        // Feel free to add more event registrations here
+        // Fetch fake rank on player join
         PlayerEvents.Joined += OnJoined;
-
-        //Apply fakerank every five seconds
-        _coroutine = Timing.RunCoroutine(FakeRankLoop());
-    }
-
-    private static void OnSSSReceived(ReferenceHub hub, ServerSpecificSettingBase ev)
-    {
-        if (!Player.TryGet(hub.networkIdentity, out Player player))
-            return;
-
-        if (ev is SSButton button && button.SettingId == Plugin.Instance.Config!.RefreshButtonId)
-            GetFakeRankFromBackend(player.UserId);
     }
 
     public static void UnregisterEvents()
     {
-        ServerSpecificSettingsSync.ServerOnSettingValueReceived -= OnSSSReceived;
+        Timing.KillCoroutines(_coroutineFakeRankLoop);
+        Timing.KillCoroutines(_coroutineFetchLoop);
+
         PlayerEvents.Joined -= OnJoined;
-        Timing.KillCoroutines(_coroutine);
     }
 
     private static IEnumerator<float> FakeRankLoop()
@@ -61,52 +47,34 @@ public static class EventHandlers
                 string fakeRank = rank.Value.Item1;
                 string fakeColor = rank.Value.Item2;
 
-                // Case 1: Player has no rank (null or empty)
-                if (string.IsNullOrEmpty(player.GroupName))
+
+                if (string.IsNullOrEmpty(fakeRank))
                 {
-                    if (!string.IsNullOrEmpty(fakeRank))
-                    {
-                        player.GroupName = fakeRank + " (Stammspieler)";
-                        player.GroupColor = fakeColor;
-                    }
+                    player.GroupName = player.UserGroup?.BadgeText ?? string.Empty;
+                    player.GroupColor = player.UserGroup?.BadgeColor ?? "default";
 
                     continue;
                 }
 
-                // Case 2: Already in format "FakeRank (Original)"
-                if (player.GroupName.Contains("("))
-                {
-                    string currentFake = player.GroupName.Split('(')[0].Trim();
-                    string originalRank = player.GroupName.Split('(')[1].Split(')')[0].Trim();
-
-                    if (currentFake == fakeRank && player.GroupColor == fakeColor)
-                        continue; // already correct
-
-                    if (!string.IsNullOrEmpty(fakeRank))
-                    {
-                        // Replace old fake with new fake or update color
-                        player.GroupName = fakeRank + " (" + originalRank + ")";
-                        player.GroupColor = fakeColor;
-                    }
-                    else
-                    {
-                        // Remove fake, restore original
-                        player.GroupName = originalRank;
-                        player.GroupColor = "default";
-                    }
-
-                    continue;
-                }
-
-                // Case 3: Has a rank but no parentheses -> add fake rank
-                if (!string.IsNullOrEmpty(fakeRank))
-                {
-                    player.GroupName = fakeRank + " (" + player.GroupName + ")";
-                    player.GroupColor = fakeColor;
-                }
+                player.GroupName = fakeRank + " (" + (player.UserGroup?.BadgeText ?? "Stammspieler") + ")";
+                player.GroupColor = fakeColor;
             }
 
-            yield return Timing.WaitForSeconds(1);
+            yield return Timing.WaitForSeconds(10f);
+        }
+    }
+
+    private static IEnumerator<float> FetchLoop()
+    {
+        while (true)
+        {
+            foreach (Player player in Player.ReadyList)
+            {
+                if (player.UserId == string.Empty || player.IsDummy || player.IsHost) continue;
+                GetFakeRankFromBackend(player.UserId);
+            }
+
+            yield return Timing.WaitForSeconds(10f);
         }
     }
 
@@ -120,13 +88,6 @@ public static class EventHandlers
 
     private static async void GetFakeRankFromBackend(string userId)
     {
-        if (FakeRankCache.TryGetValue(userId, out (DateTime LastFetch, (string Name, string Color) Rank) cache) &&
-            DateTime.UtcNow - cache.LastFetch < CacheDuration)
-        {
-            FakeRanks[userId] = cache.Rank;
-            return;
-        }
-
         (string Name, string Color) rank = (string.Empty, string.Empty);
 
         try
@@ -150,6 +111,5 @@ public static class EventHandlers
         }
 
         FakeRanks[userId] = rank;
-        FakeRankCache[userId] = (DateTime.UtcNow, rank);
     }
 }
