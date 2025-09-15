@@ -47,6 +47,7 @@ public static class EventHandlers
                 string fakeRank = rank.Value.Item1;
                 string fakeColor = rank.Value.Item2;
 
+                if (player.ReferenceHub.serverRoles.HasBadgeHidden) continue;
 
                 if (string.IsNullOrEmpty(fakeRank))
                 {

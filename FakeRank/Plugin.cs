@@ -14,7 +14,7 @@ public class Plugin : Plugin<Config>
     public override string Description { get; } = "FakeRank";
 
     public override string Author { get; } = "radston12 & AlexInABox";
-    public override Version Version { get; } = new(1, 1, 1);
+    public override Version Version { get; } = new(1, 1, 2);
     public override Version RequiredApiVersion { get; } = new(LabApiProperties.CompiledVersion);
     public Translation Translation { get; private set; }
 
