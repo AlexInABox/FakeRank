@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using LabApi.Events.Arguments.PlayerEvents;
@@ -69,12 +70,7 @@ public static class EventHandlers
     {
         while (true)
         {
-            foreach (Player player in Player.ReadyList)
-            {
-                if (player.UserId == string.Empty || player.IsDummy || player.IsHost) continue;
-                GetFakeRankFromBackend(player.UserId);
-            }
-
+            GetAllFakeRanksFromBackend();
             yield return Timing.WaitForSeconds(10f);
         }
     }
@@ -112,5 +108,45 @@ public static class EventHandlers
         }
 
         FakeRanks[userId] = rank;
+    }
+    private static async void GetAllFakeRanksFromBackend()
+    {
+        Dictionary<string, (string Name, string Color)> ranks = new();
+
+        try
+        {
+            Config cfg = Plugin.Instance.Config!;
+            using HttpClient client = new();
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", cfg.BackendAPIToken);
+
+            // collect all userIds from Player.ReadyList
+            var userIds = Player.ReadyList.Select(p => p.UserId).ToList();
+
+            // build query string: userid=...&userid=...
+            var query = string.Join("&", userIds.Select(id => $"userid={Uri.EscapeDataString(id)}"));
+
+            HttpResponseMessage res =
+                await client.GetAsync($"{cfg.BackendURL}/fakerank?{query}");
+
+            if (res.IsSuccessStatusCode)
+            {
+                string[] entries = (await res.Content.ReadAsStringAsync()).Split(';');
+                foreach (string entry in entries)
+                {
+                    string[] parts = entry.Split(',');
+                    if (parts.Length == 3)
+                        ranks[parts[0].Trim()] = (parts[1].Trim(), parts[2].Trim());
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        foreach (KeyValuePair<string, (string, string)> rank in ranks)
+        {
+            FakeRanks[rank.Key] = rank.Value;
+        }
     }
 }

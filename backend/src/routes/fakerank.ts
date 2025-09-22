@@ -15,46 +15,101 @@ export async function onRequestGet(request: Request, env: Env, ctx: ExecutionCon
 			return new Response('Unauthorized', { status: 401 });
 		}
 
-		// Extract user ID from URL parameters
+		// Extract user IDs from URL parameters (can be single or multiple)
 		const url = new URL(request.url);
-		const userId = url.searchParams.get('userid');
+		const userIds = url.searchParams.getAll('userid');
 
-		if (!userId) {
-			return new Response('User ID is required', { status: 400 });
+		if (!userIds || userIds.length === 0) {
+			return new Response('At least one User ID is required', { status: 400 });
 		}
 
-		// Query the playerdata table for the user's fakerank, fakerank_color, fakerank_until, and fakerankoverride_until
-		const stmt = env.DB.prepare('SELECT fakerank, fakerank_color, fakerank_until, fakerankoverride_until FROM playerdata WHERE id = ?');
-		const result = await stmt.bind(userId).first();
+		// Handle single user ID request (backward compatibility)
+		if (userIds.length === 1) {
+			const userId = userIds[0];
 
-		if (!result) {
-			return new Response('Player data not found', { status: 404 });
+			// Query the playerdata table for the user's fakerank, fakerank_color, fakerank_until, and fakerankoverride_until
+			const stmt = env.DB.prepare('SELECT fakerank, fakerank_color, fakerank_until, fakerankoverride_until FROM playerdata WHERE id = ?');
+			const result = await stmt.bind(userId).first();
+
+			if (!result) {
+				return new Response('Player data not found', { status: 404 });
+			}
+
+			// Extract fakerank, fakerank_color, fakerank_until, and fakerankoverride_until from the result
+			const fakerank = result.fakerank;
+			const fakerankColor = result.fakerank_color;
+			const fakerankUntil = result.fakerank_until;
+			const fakerankOverrideUntil = result.fakerankoverride_until;
+
+			// Check if fakerank exists
+			if (fakerank === null || fakerank === undefined || fakerank === '') {
+				return new Response('Fakerank not found', { status: 404 });
+			}
+
+			// Check if fakerank is still valid
+			const currentTimestamp = Math.floor(Date.now() / 1000); // Current Unix timestamp
+
+			// Check if override is active (takes precedence)
+			const hasOverride = typeof fakerankOverrideUntil === 'number' && fakerankOverrideUntil > currentTimestamp;
+
+			// If no override, check regular fakerank_until timestamp
+			if (!hasOverride && (typeof fakerankUntil !== 'number' || fakerankUntil <= currentTimestamp)) {
+				return new Response('Fakerank expired', { status: 403 });
+			}
+
+			// Return both fakerank and fakerank_color as a tuple (comma-separated)
+			const response = `${fakerank},${fakerankColor}`;
+
+			return new Response(response, {
+				status: 200,
+				headers: {
+					'Content-Type': 'text/plain',
+				},
+			});
 		}
 
-		// Extract fakerank, fakerank_color, fakerank_until, and fakerankoverride_until from the result
-		const fakerank = result.fakerank;
-		const fakerankColor = result.fakerank_color;
-		const fakerankUntil = result.fakerank_until;
-		const fakerankOverrideUntil = result.fakerankoverride_until;
+		// Handle multiple user IDs request
+		const currentTimestamp = Math.floor(Date.now() / 1000);
+		const results = [];
 
-		// Check if fakerank exists
-		if (fakerank === null || fakerank === undefined || fakerank === '') {
-			return new Response('Fakerank not found', { status: 404 });
+		// Create a query with multiple placeholders for the IN clause
+		const placeholders = userIds.map(() => '?').join(',');
+		const stmt = env.DB.prepare(
+			`SELECT id, fakerank, fakerank_color, fakerank_until, fakerankoverride_until FROM playerdata WHERE id IN (${placeholders})`
+		);
+		const dbResults = await stmt.bind(...userIds).all();
+
+		if (!dbResults.results || dbResults.results.length === 0) {
+			return new Response('No player data found', { status: 404 });
 		}
 
-		// Check if fakerank is still valid
-		const currentTimestamp = Math.floor(Date.now() / 1000); // Current Unix timestamp
+		// Process each result
+		for (const result of dbResults.results) {
+			const fakerank = result.fakerank;
+			const fakerankColor = result.fakerank_color;
+			const fakerankUntil = result.fakerank_until;
+			const fakerankOverrideUntil = result.fakerankoverride_until;
+			const userId = result.id;
 
-		// Check if override is active (takes precedence)
-		const hasOverride = typeof fakerankOverrideUntil === 'number' && fakerankOverrideUntil > currentTimestamp;
+			// Skip if no fakerank
+			if (fakerank === null || fakerank === undefined || fakerank === '') {
+				continue;
+			}
 
-		// If no override, check regular fakerank_until timestamp
-		if (!hasOverride && (typeof fakerankUntil !== 'number' || fakerankUntil <= currentTimestamp)) {
-			return new Response('Fakerank expired', { status: 403 });
+			// Check if fakerank is still valid
+			const hasOverride = typeof fakerankOverrideUntil === 'number' && fakerankOverrideUntil > currentTimestamp;
+
+			// If no override, check regular fakerank_until timestamp
+			if (!hasOverride && (typeof fakerankUntil !== 'number' || fakerankUntil <= currentTimestamp)) {
+				continue; // Skip expired fakeranks
+			}
+
+			// Add to results: userid,fakerank,color
+			results.push(`${userId},${fakerank},${fakerankColor}`);
 		}
 
-		// Return both fakerank and fakerank_color as a tuple (comma-separated)
-		const response = `${fakerank},${fakerankColor}`;
+		// Return results separated by semicolons (as expected by C# code)
+		const response = results.join(';');
 
 		return new Response(response, {
 			status: 200,
