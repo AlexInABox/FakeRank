@@ -109,6 +109,7 @@ public static class EventHandlers
 
         FakeRanks[userId] = rank;
     }
+
     private static async void GetAllFakeRanksFromBackend()
     {
         Dictionary<string, (string Name, string Color)> ranks = new();
@@ -121,10 +122,10 @@ public static class EventHandlers
                 new AuthenticationHeaderValue("Bearer", cfg.BackendAPIToken);
 
             // collect all userIds from Player.ReadyList
-            var userIds = Player.ReadyList.Select(p => p.UserId).ToList();
+            List<string> userIds = Player.ReadyList.Select(p => p.UserId).ToList();
 
             // build query string: userid=...&userid=...
-            var query = string.Join("&", userIds.Select(id => $"userid={Uri.EscapeDataString(id)}"));
+            string query = string.Join("&", userIds.Select(id => $"userid={Uri.EscapeDataString(id)}"));
 
             HttpResponseMessage res =
                 await client.GetAsync($"{cfg.BackendURL}/fakerank?{query}");
@@ -144,9 +145,11 @@ public static class EventHandlers
         {
         }
 
-        foreach (KeyValuePair<string, (string, string)> rank in ranks)
+        foreach (KeyValuePair<string, (string, string)> rank in ranks) FakeRanks[rank.Key] = rank.Value;
+        // Remove any userIds that are no longer present
+        foreach (string userId in FakeRanks.Keys.ToList().Where(userId => !ranks.ContainsKey(userId)))
         {
-            FakeRanks[rank.Key] = rank.Value;
+            FakeRanks[userId] = (string.Empty, string.Empty);
         }
     }
 }
