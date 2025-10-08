@@ -122,7 +122,7 @@ public static class EventHandlers
                 new AuthenticationHeaderValue("Bearer", cfg.BackendAPIToken);
 
             // collect all userIds from Player.ReadyList
-            List<string> userIds = Player.ReadyList.Select(p => p.UserId).ToList();
+            List<string> userIds = Player.ReadyList.Where(p => !p.IsDummy).Select(p => p.UserId).ToList();
 
             // build query string: userid=...&userid=...
             string query = string.Join("&", userIds.Select(id => $"userid={Uri.EscapeDataString(id)}"));
@@ -148,8 +148,6 @@ public static class EventHandlers
         foreach (KeyValuePair<string, (string, string)> rank in ranks) FakeRanks[rank.Key] = rank.Value;
         // Remove any userIds that are no longer present
         foreach (string userId in FakeRanks.Keys.ToList().Where(userId => !ranks.ContainsKey(userId)))
-        {
             FakeRanks[userId] = (string.Empty, string.Empty);
-        }
     }
 }

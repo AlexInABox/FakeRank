@@ -16,6 +16,6 @@
 
     <ItemGroup>
         <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" ExcludeAssets="runtime" ReferenceOutputAssembly="false" Private="true"/>
-        <PackageReference Include="Northwood.LabAPI" Version="1.1.1"/>
+        <PackageReference Include="Northwood.LabAPI" Version="1.1.3"/>
     </ItemGroup>
 </Project>
